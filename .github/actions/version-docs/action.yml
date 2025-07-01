@@ -64,44 +64,58 @@ runs:
         fi
         
         # Check if any markdown files changed since the last documentation tag
-        if [ "${{ github.event_name }}" = "push" ]; then
-          # Get the latest documentation tag
-          LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n 1)
+        # This logic applies to all event types (push, workflow_dispatch, etc.)
+        
+        # Get the latest documentation tag
+        LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n 1)
+        
+        if [ -z "$LATEST_TAG" ]; then
+          # No existing tags, check all files in the repository
+          echo "No existing documentation tags found - checking all markdown files"
+          CHANGED_FILES=$(git ls-files)
+        else
+          # Compare changes since the latest documentation tag
+          echo "Checking changes since latest tag: $LATEST_TAG"
+          CHANGED_FILES=$(git diff --name-only $LATEST_TAG..HEAD)
           
-          if [ -z "$LATEST_TAG" ]; then
-            # No existing tags, check all files in the repository
-            echo "No existing documentation tags found - checking all markdown files"
-            CHANGED_FILES=$(git ls-files)
+          # Debug: Show what files changed
+          echo "DEBUG: All changed files since $LATEST_TAG:"
+          if [ -n "$CHANGED_FILES" ]; then
+            echo "$CHANGED_FILES"
           else
-            # Compare changes since the latest documentation tag
-            echo "Checking changes since latest tag: $LATEST_TAG"
-            CHANGED_FILES=$(git diff --name-only $LATEST_TAG..HEAD)
+            echo "(no files changed)"
           fi
-          
-          # Filter changes to the specified docs path and check for .md files
-          DOCS_PATH="${{ inputs.docs_path }}"
+        fi
+        
+        # Filter changes to the specified docs path and check for .md files
+        DOCS_PATH="${{ inputs.docs_path }}"
+        echo "DEBUG: Filtering for markdown files in docs path: '$DOCS_PATH'"
+        
+        if [ -n "$CHANGED_FILES" ]; then
           if [ "$DOCS_PATH" = "." ]; then
             MD_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.md$' || true)
           else
             MD_CHANGES=$(echo "$CHANGED_FILES" | grep -E "^${DOCS_PATH}.*\.md$" || true)
           fi
-          
-          if [ -n "$MD_CHANGES" ]; then
-            echo "Markdown files changed in $DOCS_PATH since $LATEST_TAG:"
-            echo "$MD_CHANGES"
-            echo "docs-changed=true" >> $GITHUB_OUTPUT
-          else
-            echo "No markdown files changed in $DOCS_PATH since $LATEST_TAG"
-            echo "Changed files since $LATEST_TAG:"
-            echo "$CHANGED_FILES"
-            echo "docs-changed=false" >> $GITHUB_OUTPUT
-          fi
-        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-          echo "Manual trigger - proceeding with versioning"
+        else
+          MD_CHANGES=""
+        fi
+        
+        echo "DEBUG: Filtered markdown changes:"
+        if [ -n "$MD_CHANGES" ]; then
+          echo "$MD_CHANGES"
+        else
+          echo "(no markdown files changed)"
+        fi
+        
+        # Only set docs-changed=true if we actually found markdown changes
+        if [ -n "$MD_CHANGES" ] && [ "$MD_CHANGES" != "" ]; then
+          echo "✅ Markdown files changed in $DOCS_PATH since $LATEST_TAG"
+          echo "Event type: ${{ github.event_name }}"
           echo "docs-changed=true" >> $GITHUB_OUTPUT
         else
-          # For other events (like PR), don't create tags by default
-          echo "${{ github.event_name }} event - skipping versioning by default"
+          echo "❌ No markdown files changed in $DOCS_PATH since $LATEST_TAG"
+          echo "Event type: ${{ github.event_name }}"
           echo "docs-changed=false" >> $GITHUB_OUTPUT
         fi
 
@@ -169,12 +183,6 @@ runs:
             INCREMENT_TYPE="patch"
           fi
           echo "description=Forced versioning ($INCREMENT_TYPE increment): version incremented to ${{ steps.tag-version.outputs.tag || 'documentation-v1.0.0' }}" >> $GITHUB_OUTPUT
-        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-          INCREMENT_TYPE="${{ inputs.version_increment }}"
-          if [[ -z "$INCREMENT_TYPE" ]]; then
-            INCREMENT_TYPE="patch"
-          fi
-          echo "description=Manual trigger ($INCREMENT_TYPE increment): version incremented to ${{ steps.tag-version.outputs.tag || 'documentation-v1.0.0' }}" >> $GITHUB_OUTPUT
         elif [[ "${{ steps.check-changes.outputs.docs-changed }}" == "true" ]]; then
           echo "description=Changes detected in markdown files: version incremented to ${{ steps.tag-version.outputs.tag }} (patch increment)" >> $GITHUB_OUTPUT
         else
