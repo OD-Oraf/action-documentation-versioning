@@ -26,7 +26,15 @@ jobs:
     runs-on: ubuntu-latest
     
     outputs:
-      version-tag: ${{ steps.tag-version.outputs.tag }}
+      version-tag:
+        description: "The documentation version tag that was created"
+        value: ${{ steps.tag-version.outputs.tag }}
+      docs-changed:
+        description: "Whether markdown file changes were detected"
+        value: ${{ steps.check-changes.outputs.docs-changed }}
+      version-description:
+        description: "Description of versioning action taken"
+        value: ${{ steps.set-description.outputs.description }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
@@ -34,6 +42,47 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0  # Fetch all history for all tags and branches
+
+      - name: Check for markdown file changes
+        id: check-changes
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "Manual trigger - proceeding with versioning"
+            echo "docs-changed=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # For push events, check if any markdown files changed
+          if [ "${{ github.event_name }}" = "push" ]; then
+            # Get the previous commit (parent of current HEAD)
+            PREV_COMMIT="${{ github.event.before }}"
+            CURRENT_COMMIT="${{ github.sha }}"
+            
+            # If this is the first commit, compare against empty tree
+            if [ "$PREV_COMMIT" = "0000000000000000000000000000000000000000" ]; then
+              CHANGED_FILES=$(git diff --name-only 4b825dc642cb6eb9a060e54bf8d69288fbee4904 $CURRENT_COMMIT)
+            else
+              CHANGED_FILES=$(git diff --name-only $PREV_COMMIT $CURRENT_COMMIT)
+            fi
+            
+            # Check if any .md files were changed
+            MD_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.md$' || true)
+            
+            if [ -n "$MD_CHANGES" ]; then
+              echo "Markdown files changed:"
+              echo "$MD_CHANGES"
+              echo "docs-changed=true" >> $GITHUB_OUTPUT
+            else
+              echo "No markdown files changed in this push"
+              echo "Changed files:"
+              echo "$CHANGED_FILES"
+              echo "docs-changed=false" >> $GITHUB_OUTPUT
+            fi
+          else
+            # For PR events, don't create tags
+            echo "Pull request event - skipping versioning"
+            echo "docs-changed=false" >> $GITHUB_OUTPUT
+          fi
 
       - name: Run a one-line script
         run: echo Hello, world!
@@ -45,69 +94,93 @@ jobs:
 
       - name: Tag documentation version
         id: tag-version
+        if: github.event_name == 'workflow_dispatch' || steps.check-changes.outputs.docs-changed == 'true'
         run: |
-          # Configure git
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          
-          # Get version increment strategy (default to patch for push events)
-          VERSION_INCREMENT="${{ github.event.inputs.version_increment || 'patch' }}"
-          echo "Version increment strategy: $VERSION_INCREMENT"
-          
           # Get the latest documentation tag
-          LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n1)
+          LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n 1)
           
           if [ -z "$LATEST_TAG" ]; then
-            # No existing documentation tags, create initial version
+            # No existing tags, start with v1.0.0
             NEW_TAG="documentation-v1.0.0"
-            echo "Creating initial documentation tag: $NEW_TAG"
           else
-            echo "Latest documentation tag: $LATEST_TAG"
+            # Extract version numbers from the latest tag
+            VERSION=$(echo $LATEST_TAG | sed 's/documentation-v//')
+            MAJOR=$(echo $VERSION | cut -d. -f1)
+            MINOR=$(echo $VERSION | cut -d. -f2)
+            PATCH=$(echo $VERSION | cut -d. -f3)
             
-            # Extract version numbers (remove 'documentation-v' prefix)
-            VERSION=${LATEST_TAG#documentation-v}
-            
-            # Split version into major.minor.patch
-            IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
-            
-            # Increment version based on strategy
-            case $VERSION_INCREMENT in
-              major)
+            # Increment based on the version_increment input
+            case "${{ github.event.inputs.version_increment }}" in
+              "major")
                 MAJOR=$((MAJOR + 1))
                 MINOR=0
                 PATCH=0
-                echo "Incrementing major version"
                 ;;
-              minor)
+              "minor")
                 MINOR=$((MINOR + 1))
                 PATCH=0
-                echo "Incrementing minor version"
                 ;;
-              patch)
+              "patch"|"")
                 PATCH=$((PATCH + 1))
-                echo "Incrementing patch version"
                 ;;
               *)
-                echo "Invalid version increment strategy: $VERSION_INCREMENT. Using patch."
-                PATCH=$((PATCH + 1))
+                echo "Invalid version_increment value: ${{ github.event.inputs.version_increment }}"
+                echo "Valid values are: major, minor, patch"
+                exit 1
                 ;;
             esac
             
             NEW_TAG="documentation-v${MAJOR}.${MINOR}.${PATCH}"
-            echo "Creating new documentation tag: $NEW_TAG"
           fi
           
-          # Create and push the new tag
-          git tag "$NEW_TAG"
+          # Configure git user
+          git config user.name "GitHub Actions"
+          git config user.email "action@github.com"
+          
+          # Create and push the tag
+          git tag -a "$NEW_TAG" -m "Documentation version $NEW_TAG"
           git push origin "$NEW_TAG"
           
           echo "Successfully created and pushed tag: $NEW_TAG"
           echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
 
+      - name: Set version description
+        id: set-description
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            INCREMENT_TYPE="${{ github.event.inputs.version_increment }}"
+            if [[ -z "$INCREMENT_TYPE" ]]; then
+              INCREMENT_TYPE="patch"
+            fi
+            echo "description=Manual trigger ($INCREMENT_TYPE increment): version incremented to ${{ steps.tag-version.outputs.tag || 'documentation-v1.0.0' }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ steps.check-changes.outputs.docs-changed }}" == "true" ]]; then
+            echo "description=Changes detected in markdown files: version incremented to ${{ steps.tag-version.outputs.tag }} (patch increment)" >> $GITHUB_OUTPUT
+          else
+            echo "description=No changes detected in markdown files: version increment skipped" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Display version action
+        run: |
+          echo " **Versioning Summary:**"
+          echo "${{ steps.set-description.outputs.description }}"
+
+      - name: Skip versioning notification
+        if: steps.check-changes.outputs.docs-changed == 'false'
+        run: |
+          echo "Documentation versioning skipped"
+          echo "Reason: No markdown files were modified in this push"
+          echo "To force versioning, use the manual workflow trigger"
+
   release:
     needs: build
+    if: needs.build.outputs.docs-changed == 'true'
     runs-on: ubuntu-latest
     name: "Release ${{ needs.build.outputs.version-tag }}"
+    
+    outputs:
+      version-tag: ${{ needs.build.outputs.version-tag }}
+      docs-changed: ${{ needs.build.outputs.docs-changed }}
+      version-description: ${{ needs.build.outputs.version-description }}
     
     steps:
       - name: Display version
