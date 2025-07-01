@@ -37,6 +37,26 @@ jobs:
         with:
           fetch-depth: 0  # Fetch all history for all tags and branches
 
+      - name: Validate workflow inputs
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          VERSION_INCREMENT="${{ github.event.inputs.version_increment }}"
+          
+          # Check if version_increment is valid
+          if [[ -n "$VERSION_INCREMENT" && ! "$VERSION_INCREMENT" =~ ^(patch|minor|major)$ ]]; then
+            echo "❌ Error: Invalid version_increment value: '$VERSION_INCREMENT'"
+            echo "Valid values are: patch, minor, major"
+            exit 1
+          fi
+          
+          # Set default if empty
+          if [[ -z "$VERSION_INCREMENT" ]]; then
+            VERSION_INCREMENT="patch"
+            echo "ℹ️  No version_increment specified, defaulting to: patch"
+          else
+            echo "✅ Version increment validated: $VERSION_INCREMENT"
+          fi
+
       - name: Check for markdown file changes
         id: check-changes
         run: |
@@ -77,14 +97,6 @@ jobs:
             echo "Pull request event - skipping versioning"
             echo "docs-changed=false" >> $GITHUB_OUTPUT
           fi
-
-      - name: Run a one-line script
-        run: echo Hello, world!
-
-      - name: Run a multi-line script
-        run: |
-          echo Add other actions to build,
-          echo test, and deploy your project.
 
       - name: Tag documentation version
         id: tag-version
