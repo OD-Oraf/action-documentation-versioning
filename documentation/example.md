@@ -1,4 +1,6 @@
-# Example
+# Cant remember the version number
+
+
 
 Simple example
 
@@ -108,24 +110,4 @@ Include a brief overview of how to choose the runner environment. These should b
 - Include code samples.
 {% endcomment %}
 
-## Caching dependencies
-
-{% comment %}
-Include an example of restoring cached dependencies. We'll want to link out to the article about caching for more information (https://docs.github.com/en/actions/configuring-and-managing-workflows/caching-dependencies-to-speed-up-workflows).
-{% endcomment %}
-
-## Building your code
-
-{% comment %}
-- Include any compile steps.
-- Include any test commands.
-- Note that you can use the same commands that your repository needs to build and test your code by simply replacing the commands in the `run` keyword.
-- Include any basic examples or commands specific to test frameworks.
-- Include any common databases or services that might be needed. If so, we can link out to the services guides in the docs (https://docs.github.com/en/actions/configuring-and-managing-workflows/using-databases-and-service-containers).
-{% endcomment %}
-
-## Packaging workflow data as artifacts
-
-{% comment %}
-This section can simply link out to https://docs.github.com/en/actions/configuring-and-managing-workflows/persisting-workflow-data-using-artifacts or provide additional information about which artifacts might be typical to upload for a CI workflow.
-{% endcomment %}
+Edits for new version
