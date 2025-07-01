@@ -31,7 +31,7 @@ jobs:
     steps:
       - name: Rollback Documentation
         id: rollback
-        uses: .github/actions/rollback-docs
+        uses: ./.github/actions/rollback-docs
         with:
           rollback_to_version: ${{ github.event.inputs.rollback_to_version }}
           target_branch: ${{ github.event.inputs.target_branch }}
