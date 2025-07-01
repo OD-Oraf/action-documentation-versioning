@@ -126,25 +126,33 @@ runs:
         for file in ${{ steps.find-files.outputs.markdown-files }}; do
           # Remove leading ./
           clean_file=${file#./}
-          full_path="${{ inputs.docs-path }}/$clean_file"
           
-          echo "Processing: $clean_file"
+          # Construct paths correctly
+          if [ "${{ inputs.docs-path }}" = "." ]; then
+            source_path="$clean_file"
+            target_path="$clean_file"
+          else
+            source_path="${{ inputs.docs-path }}/$clean_file"
+            target_path="${{ inputs.docs-path }}/$clean_file"
+          fi
+          
+          echo "Processing: $clean_file (source: $source_path, target: $target_path)"
           
           # Check if file exists in tag
-          if git show "$FULL_TAG:$full_path" > /dev/null 2>&1; then
+          if git show "$FULL_TAG:$source_path" > /dev/null 2>&1; then
             # Create directory if it doesn't exist
-            mkdir -p "$(dirname "${{ inputs.docs-path }}/$clean_file")"
+            mkdir -p "$(dirname "$target_path")"
             
             # Extract file from tag and save it to target location
-            git show "$FULL_TAG:$full_path" > "${{ inputs.docs-path }}/$clean_file"
+            git show "$FULL_TAG:$source_path" > "$target_path"
             
             # Add the file to git (this will stage it regardless of changes)
-            git add "${{ inputs.docs-path }}/$clean_file"
+            git add "$target_path"
             MERGED_FILES="$MERGED_FILES $clean_file"
             CHANGES_MADE=true
             echo "✅ Merged: $clean_file"
           else
-            echo "⚠️  File not found in tag: $full_path"
+            echo "⚠️  File not found in tag: $source_path"
           fi
         done
 
@@ -156,15 +164,13 @@ runs:
 
         if [ "$CHANGES_MADE" = true ]; then
           COMMIT_MSG="docs: merge markdown files from $FULL_TAG
-
-Merged files:$MERGED_FILES
-
-Source version: ${{ inputs.version }}
-Target branch: ${{ inputs.target-branch }}
-Documentation path: ${{ inputs.docs-path }}"
-          
-          git commit -m "$COMMIT_MSG"
-          COMMIT_SHA=$(git rev-parse HEAD)
+          Merged files:$MERGED_FILES
+          Source version: ${{ inputs.version }}
+          Target branch: ${{ inputs.target-branch }}
+          Documentation path: ${{ inputs.docs-path }}"
+                    
+                    git commit -m "$COMMIT_MSG"
+                    COMMIT_SHA=$(git rev-parse HEAD)
           
           echo "✅ Created commit: $COMMIT_SHA"
           echo "merged-files=$MERGED_FILES" >> $GITHUB_OUTPUT
