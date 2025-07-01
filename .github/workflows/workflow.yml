@@ -26,15 +26,9 @@ jobs:
     runs-on: ubuntu-latest
     
     outputs:
-      version-tag:
-        description: "The documentation version tag that was created"
-        value: ${{ steps.tag-version.outputs.tag }}
-      docs-changed:
-        description: "Whether markdown file changes were detected"
-        value: ${{ steps.check-changes.outputs.docs-changed }}
-      version-description:
-        description: "Description of versioning action taken"
-        value: ${{ steps.set-description.outputs.description }}
+      version-tag: ${{ steps.tag-version.outputs.tag }}
+      docs-changed: ${{ steps.check-changes.outputs.docs-changed }}
+      version-description: ${{ steps.set-description.outputs.description }}
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:
