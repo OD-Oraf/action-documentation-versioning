@@ -110,6 +110,11 @@ jobs:
       contents: write
     
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Display rollback information
         run: |
           echo "## 🔄 Documentation Rollback"
@@ -132,12 +137,13 @@ jobs:
       - name: Create rollback tag
         if: steps.rollback.outputs.commit-sha != ''
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "Documentation Rollback Action"
+          # Configure git user
+          git config user.name "GitHub Actions"
+          git config user.email "action@github.com"
           
           # Create a rollback tag for tracking
           ROLLBACK_TAG="rollback-to-v${{ github.event.inputs.rollback_to_version }}-$(date +%Y%m%d-%H%M%S)"
-          git tag "$ROLLBACK_TAG" "${{ steps.rollback.outputs.commit-sha }}"
+          git tag -a "$ROLLBACK_TAG" "${{ steps.rollback.outputs.commit-sha }}" -m "Rollback to documentation-v${{ github.event.inputs.rollback_to_version }}"
           git push origin "$ROLLBACK_TAG"
           
           echo "✅ Created rollback tracking tag: $ROLLBACK_TAG"
