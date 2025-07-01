@@ -1,0 +1,190 @@
+name: Rollback Documentation
+
+on:
+  workflow_dispatch:
+    inputs:
+      rollback_to_version:
+        description: 'Documentation version to rollback to (e.g., 1.0.0)'
+        required: true
+        type: string
+      target_branch:
+        description: 'Branch to rollback documentation in'
+        required: false
+        default: 'main'
+        type: string
+      docs_path:
+        description: 'Path to documentation files'
+        required: false
+        default: '.'
+        type: string
+      confirm_rollback:
+        description: 'Type "CONFIRM" to proceed with rollback'
+        required: true
+        type: string
+
+jobs:
+  validate-rollback:
+    runs-on: ubuntu-latest
+    outputs:
+      should-proceed: ${{ steps.validate.outputs.should-proceed }}
+      latest-version: ${{ steps.get-latest.outputs.latest-version }}
+      rollback-tag: ${{ steps.construct-tags.outputs.rollback-tag }}
+      latest-tag: ${{ steps.construct-tags.outputs.latest-tag }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Construct tag names
+        id: construct-tags
+        run: |
+          ROLLBACK_VERSION="${{ github.event.inputs.rollback_to_version }}"
+          ROLLBACK_TAG="documentation-v${ROLLBACK_VERSION}"
+          echo "rollback-tag=$ROLLBACK_TAG" >> $GITHUB_OUTPUT
+          echo "✅ Constructed rollback tag: $ROLLBACK_TAG"
+
+      - name: Validate confirmation
+        id: validate
+        run: |
+          if [ "${{ github.event.inputs.confirm_rollback }}" != "CONFIRM" ]; then
+            echo "❌ Rollback not confirmed. You must type 'CONFIRM' to proceed."
+            echo "should-proceed=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
+          echo "✅ Rollback confirmed"
+          echo "should-proceed=true" >> $GITHUB_OUTPUT
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ github.event.inputs.rollback_to_version }}"
+          if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "❌ Error: Version must follow semantic versioning pattern 'X.Y.Z' (e.g., 1.0.0)"
+            echo "Provided: $VERSION"
+            exit 1
+          fi
+          echo "✅ Version format is valid: $VERSION"
+
+      - name: Get latest documentation version
+        id: get-latest
+        run: |
+          LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n1)
+          if [ -n "$LATEST_TAG" ]; then
+            LATEST_VERSION=${LATEST_TAG#documentation-v}
+            echo "latest-version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+            echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "Current latest documentation version: $LATEST_VERSION ($LATEST_TAG)"
+          else
+            echo "latest-version=" >> $GITHUB_OUTPUT
+            echo "latest-tag=" >> $GITHUB_OUTPUT
+            echo "No documentation tags found"
+          fi
+
+      - name: Validate rollback target
+        run: |
+          ROLLBACK_TAG="${{ steps.construct-tags.outputs.rollback-tag }}"
+          ROLLBACK_VERSION="${{ github.event.inputs.rollback_to_version }}"
+          LATEST_VERSION="${{ steps.get-latest.outputs.latest-version }}"
+          
+          # Check if rollback tag exists
+          if ! git tag -l | grep -q "^$ROLLBACK_TAG$"; then
+            echo "❌ Error: Version '$ROLLBACK_VERSION' does not exist (tag '$ROLLBACK_TAG' not found)"
+            echo "Available documentation versions:"
+            git tag -l "documentation-v*" | sort -V | sed 's/documentation-v//'
+            exit 1
+          fi
+          
+          # Check if we're actually rolling back (not forward)
+          if [ "$ROLLBACK_VERSION" = "$LATEST_VERSION" ]; then
+            echo "⚠️  Warning: Rolling back to the same version as current latest ($ROLLBACK_VERSION)"
+          fi
+          
+          echo "✅ Rollback target version '$ROLLBACK_VERSION' is valid"
+
+  rollback-documentation:
+    needs: validate-rollback
+    if: needs.validate-rollback.outputs.should-proceed == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Display rollback information
+        run: |
+          echo "## 🔄 Documentation Rollback"
+          echo "- **Rolling back to version**: ${{ github.event.inputs.rollback_to_version }}"
+          echo "- **Rolling back to tag**: ${{ needs.validate-rollback.outputs.rollback-tag }}"
+          echo "- **Current latest version**: ${{ needs.validate-rollback.outputs.latest-version }}"
+          echo "- **Target branch**: ${{ github.event.inputs.target_branch }}"
+          echo "- **Documentation path**: ${{ github.event.inputs.docs_path }}"
+          echo ""
+          echo "⚠️  **This will overwrite current documentation with the selected version**"
+
+      - name: Rollback documentation
+        id: rollback
+        uses: ./
+        with:
+          version: ${{ github.event.inputs.rollback_to_version }}
+          target-branch: ${{ github.event.inputs.target_branch }}
+          docs-path: ${{ github.event.inputs.docs_path }}
+
+      - name: Create rollback tag
+        if: steps.rollback.outputs.commit-sha != ''
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "Documentation Rollback Action"
+          
+          # Create a rollback tag for tracking
+          ROLLBACK_TAG="rollback-to-v${{ github.event.inputs.rollback_to_version }}-$(date +%Y%m%d-%H%M%S)"
+          git tag "$ROLLBACK_TAG" "${{ steps.rollback.outputs.commit-sha }}"
+          git push origin "$ROLLBACK_TAG"
+          
+          echo "✅ Created rollback tracking tag: $ROLLBACK_TAG"
+
+      - name: Rollback summary
+        run: |
+          echo "## 📋 Rollback Summary"
+          
+          if [ -n "${{ steps.rollback.outputs.merged-files }}" ]; then
+            echo "### ✅ Rollback Completed Successfully"
+            echo "- **Rolled back to version**: ${{ github.event.inputs.rollback_to_version }}"
+            echo "- **Full tag used**: ${{ steps.rollback.outputs.tag-used }}"
+            echo "- **Files updated**: ${{ steps.rollback.outputs.merged-files }}"
+            echo "- **Commit SHA**: ${{ steps.rollback.outputs.commit-sha }}"
+            echo "- **Target branch**: ${{ github.event.inputs.target_branch }}"
+            echo ""
+            echo "🎯 **Documentation has been successfully rolled back!**"
+          else
+            echo "### ℹ️ No Changes Made"
+            echo "The documentation in '${{ github.event.inputs.target_branch }}' was already at the same state as version '${{ github.event.inputs.rollback_to_version }}'."
+            echo ""
+            echo "✨ **No rollback was necessary.**"
+          fi
+
+  notify-rollback:
+    needs: [validate-rollback, rollback-documentation]
+    if: always() && needs.validate-rollback.outputs.should-proceed == 'true'
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Rollback notification
+        run: |
+          if [ "${{ needs.rollback-documentation.result }}" = "success" ]; then
+            echo "🔄 **Documentation Rollback Completed**"
+            echo ""
+            echo "The documentation has been successfully rolled back to version **${{ github.event.inputs.rollback_to_version }}**"
+            echo ""
+            echo "**Details:**"
+            echo "- Version: ${{ github.event.inputs.rollback_to_version }}"
+            echo "- Tag: ${{ needs.validate-rollback.outputs.rollback-tag }}"
+            echo "- Branch: ${{ github.event.inputs.target_branch }}"
+            echo "- Path: ${{ github.event.inputs.docs_path }}"
+            echo "- Workflow: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          else
+            echo "❌ **Documentation Rollback Failed**"
+            echo ""
+            echo "The rollback to version **${{ github.event.inputs.rollback_to_version }}** encountered an error."
+            echo ""
+            echo "Please check the workflow logs for details: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          fi

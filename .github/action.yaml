@@ -3,8 +3,8 @@ description: 'Checkout code and merge markdown files from a specific documentati
 author: 'OD-Oraf'
 
 inputs:
-  tag:
-    description: 'Documentation tag to merge from (e.g., documentation-v1.0.0)'
+  version:
+    description: 'Documentation version to merge from (e.g., 1.0.0)'
     required: true
   target-branch:
     description: 'Target branch to merge markdown files into'
@@ -22,18 +22,32 @@ outputs:
   commit-sha:
     description: 'SHA of the commit created (if any)'
     value: ${{ steps.merge-docs.outputs.commit-sha }}
+  tag-used:
+    description: 'Full tag name that was used for the merge'
+    value: ${{ steps.construct-tag.outputs.full-tag }}
 
 runs:
   using: 'composite'
   steps:
+    - name: Construct full tag name
+      shell: bash
+      id: construct-tag
+      run: |
+        VERSION="${{ inputs.version }}"
+        FULL_TAG="documentation-v${VERSION}"
+        echo "full-tag=$FULL_TAG" >> $GITHUB_OUTPUT
+        echo "✅ Constructed tag: $FULL_TAG"
+
     - name: Validate inputs
       shell: bash
       run: |
-        if [[ ! "${{ inputs.tag }}" =~ ^documentation-v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-          echo "Error: Tag must follow pattern 'documentation-vX.Y.Z'"
+        VERSION="${{ inputs.version }}"
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "Error: Version must follow semantic versioning pattern 'X.Y.Z' (e.g., 1.0.0)"
+          echo "Provided: $VERSION"
           exit 1
         fi
-        echo "✅ Tag format is valid: ${{ inputs.tag }}"
+        echo "✅ Version format is valid: $VERSION"
 
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -44,20 +58,22 @@ runs:
     - name: Verify tag exists
       shell: bash
       run: |
-        if ! git tag -l | grep -q "^${{ inputs.tag }}$"; then
-          echo "Error: Tag '${{ inputs.tag }}' does not exist"
+        FULL_TAG="${{ steps.construct-tag.outputs.full-tag }}"
+        if ! git tag -l | grep -q "^$FULL_TAG$"; then
+          echo "Error: Tag '$FULL_TAG' does not exist"
           echo "Available documentation tags:"
           git tag -l "documentation-v*" | sort -V
           exit 1
         fi
-        echo "✅ Tag '${{ inputs.tag }}' exists"
+        echo "✅ Tag '$FULL_TAG' exists"
 
     - name: Create temporary branch for tag checkout
       shell: bash
       run: |
-        TEMP_BRANCH="temp-docs-${{ inputs.tag }}-$(date +%s)"
+        FULL_TAG="${{ steps.construct-tag.outputs.full-tag }}"
+        TEMP_BRANCH="temp-docs-${{ inputs.version }}-$(date +%s)"
         echo "TEMP_BRANCH=$TEMP_BRANCH" >> $GITHUB_ENV
-        git checkout -b "$TEMP_BRANCH" "${{ inputs.tag }}"
+        git checkout -b "$TEMP_BRANCH" "$FULL_TAG"
         echo "✅ Created temporary branch: $TEMP_BRANCH"
 
     - name: Find markdown files in tag
@@ -68,7 +84,7 @@ runs:
         MARKDOWN_FILES=$(find . -name "*.md" -type f | sort)
         
         if [ -z "$MARKDOWN_FILES" ]; then
-          echo "Warning: No markdown files found in path '${{ inputs.docs-path }}' for tag '${{ inputs.tag }}'"
+          echo "Warning: No markdown files found in path '${{ inputs.docs-path }}' for version ${{ inputs.version }}"
           echo "markdown-files=" >> $GITHUB_OUTPUT
         else
           echo "Found markdown files:"
@@ -102,6 +118,7 @@ runs:
         # Create a list to track actually merged files
         MERGED_FILES=""
         CHANGES_MADE=false
+        FULL_TAG="${{ steps.construct-tag.outputs.full-tag }}"
 
         cd "${{ inputs.docs-path }}"
         
@@ -110,12 +127,12 @@ runs:
           clean_file=${file#./}
           
           # Check if file exists in tag
-          if git show "${{ inputs.tag }}:${{ inputs.docs-path }}/$clean_file" > /dev/null 2>&1; then
+          if git show "$FULL_TAG:${{ inputs.docs-path }}/$clean_file" > /dev/null 2>&1; then
             # Create directory if it doesn't exist
             mkdir -p "$(dirname "$clean_file")"
             
             # Extract file from tag and save it
-            git show "${{ inputs.tag }}:${{ inputs.docs-path }}/$clean_file" > "$clean_file"
+            git show "$FULL_TAG:${{ inputs.docs-path }}/$clean_file" > "$clean_file"
             
             # Check if file actually changed
             if git diff --quiet "$clean_file" 2>/dev/null || ! git ls-files --error-unmatch "$clean_file" > /dev/null 2>&1; then
@@ -132,11 +149,11 @@ runs:
         done
 
         if [ "$CHANGES_MADE" = true ]; then
-          COMMIT_MSG="docs: merge markdown files from ${{ inputs.tag }}
+          COMMIT_MSG="docs: merge markdown files from $FULL_TAG
 
           Merged files:$MERGED_FILES
           
-          Source tag: ${{ inputs.tag }}
+          Source version: ${{ inputs.version }}
           Target branch: ${{ inputs.target-branch }}"
           
           git commit -m "$COMMIT_MSG"
@@ -176,7 +193,8 @@ runs:
       shell: bash
       run: |
         echo "## 📋 Documentation Merge Summary"
-        echo "- **Tag**: ${{ inputs.tag }}"
+        echo "- **Version**: ${{ inputs.version }}"
+        echo "- **Full Tag**: ${{ steps.construct-tag.outputs.full-tag }}"
         echo "- **Target Branch**: ${{ inputs.target-branch }}"
         echo "- **Documentation Path**: ${{ inputs.docs-path }}"
         
