@@ -67,6 +67,17 @@ jobs:
           fi
           echo "✅ Version format is valid: $VERSION"
 
+      - name: Validate target branch exists
+        run: |
+          TARGET_BRANCH="${{ github.event.inputs.target_branch }}"
+          if ! git show-ref --verify --quiet refs/heads/"$TARGET_BRANCH" && ! git show-ref --verify --quiet refs/remotes/origin/"$TARGET_BRANCH"; then
+            echo "❌ Error: Target branch '$TARGET_BRANCH' does not exist"
+            echo "Available branches:"
+            git branch -a | grep -E "(remotes/origin/|^\s*\*?\s*[^/]+$)" | sed 's/remotes\/origin\///' | sed 's/^\s*\*\?\s*//' | sort -u
+            exit 1
+          fi
+          echo "✅ Target branch '$TARGET_BRANCH' exists"
+
       - name: Get latest documentation version
         id: get-latest
         run: |
@@ -103,6 +114,33 @@ jobs:
           
           echo "✅ Rollback target version '$ROLLBACK_VERSION' is valid"
 
+      - name: Validate documentation path
+        run: |
+          DOCS_PATH="${{ github.event.inputs.docs_path }}"
+          
+          # Handle current directory case
+          if [[ "$DOCS_PATH" == "." ]]; then
+            echo "✅ Using current directory as documentation path"
+            exit 0
+          fi
+          
+          # Check if the path exists in the target branch
+          if [[ ! -d "$DOCS_PATH" ]]; then
+            echo "❌ Error: Documentation path '$DOCS_PATH' does not exist in branch '${{ github.event.inputs.target_branch }}'"
+            echo "Available directories:"
+            find . -type d -maxdepth 3 | head -10
+            exit 1
+          fi
+          
+          # Check if path contains markdown files (current or target version)
+          MD_FILES_CURRENT=$(find "$DOCS_PATH" -name "*.md" -type f | head -5)
+          if [[ -z "$MD_FILES_CURRENT" ]]; then
+            echo "⚠️  Warning: No markdown files found in '$DOCS_PATH' in current branch"
+            echo "This may be expected if documentation was removed"
+          else
+            echo "✅ Documentation path '$DOCS_PATH' exists and contains markdown files"
+          fi
+
   rollback-documentation:
     needs: validate-rollback
     if: needs.validate-rollback.outputs.should-proceed == 'true'
@@ -116,6 +154,18 @@ jobs:
         with:
           fetch-depth: 0
           ref: ${{ github.event.inputs.target_branch }}
+
+      - name: Ensure clean working directory
+        run: |
+          if [[ -n $(git status --porcelain) ]]; then
+            echo "❌ Error: Working directory is not clean"
+            echo "Uncommitted changes detected:"
+            git status --porcelain
+            echo ""
+            echo "Please commit or stash your changes before proceeding with rollback"
+            exit 1
+          fi
+          echo "✅ Working directory is clean"
 
       - name: Display rollback information
         run: |
