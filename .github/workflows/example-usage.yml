@@ -44,31 +44,4 @@ jobs:
           version_increment: ${{ github.event.inputs.version_increment || 'patch' }}
           force_versioning: ${{ github.event.inputs.force_versioning || 'false' }}
           docs_path: 'documentation'
-  
-  create-release:
-    needs: version-documentation
-    if: needs.version-documentation.outputs.tag-created == 'true'
-    runs-on: ubuntu-latest
-    name: "Release ${{ needs.version-documentation.outputs.version-tag }}"
-    
-    steps:
-      - name: Display release information
-        run: |
-          echo "🎉 **Documentation Release Created**"
-          echo "**Version:** ${{ needs.version-documentation.outputs.version-tag }}"
-          echo "**Changes Detected:** ${{ needs.version-documentation.outputs.docs-changed }}"
-          echo ""
-          echo "The documentation has been successfully versioned and tagged."
-          echo "You can now use this tag with the documentation merge action."
-      
-      - name: Example - Use with merge action
-        run: |
-          echo "Example usage with the composite merge action:"
-          echo ""
-          echo "```yaml"
-          echo "- uses: ./"
-          echo "  with:"
-          echo "    tag: ${{ needs.version-documentation.outputs.version-tag }}"
-          echo "    target-branch: main"
-          echo "    create-pr: true"
-          echo "```"
+
