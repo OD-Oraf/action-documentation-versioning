@@ -16,4 +16,4 @@ This permission allows the action to:
 - Push tags to the repository
 - Configure git user settings
 
-## Version 1.1.4
+## Version 1.0.0
