@@ -7,6 +7,16 @@ on:
     branches: [ "main" ]
 
   workflow_dispatch:
+    inputs:
+      version_increment:
+        description: 'Version increment strategy'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
 
 jobs:
   build:
@@ -40,6 +50,10 @@ jobs:
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           
+          # Get version increment strategy (default to patch for push events)
+          VERSION_INCREMENT="${{ github.event.inputs.version_increment || 'patch' }}"
+          echo "Version increment strategy: $VERSION_INCREMENT"
+          
           # Get the latest documentation tag
           LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n1)
           
@@ -56,8 +70,28 @@ jobs:
             # Split version into major.minor.patch
             IFS='.' read -r MAJOR MINOR PATCH <<< "$VERSION"
             
-            # Increment patch version (you can modify this logic for major/minor increments)
-            PATCH=$((PATCH + 1))
+            # Increment version based on strategy
+            case $VERSION_INCREMENT in
+              major)
+                MAJOR=$((MAJOR + 1))
+                MINOR=0
+                PATCH=0
+                echo "Incrementing major version"
+                ;;
+              minor)
+                MINOR=$((MINOR + 1))
+                PATCH=0
+                echo "Incrementing minor version"
+                ;;
+              patch)
+                PATCH=$((PATCH + 1))
+                echo "Incrementing patch version"
+                ;;
+              *)
+                echo "Invalid version increment strategy: $VERSION_INCREMENT. Using patch."
+                PATCH=$((PATCH + 1))
+                ;;
+            esac
             
             NEW_TAG="documentation-v${MAJOR}.${MINOR}.${PATCH}"
             echo "Creating new documentation tag: $NEW_TAG"
