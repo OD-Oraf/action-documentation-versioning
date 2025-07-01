@@ -63,17 +63,19 @@ runs:
           exit 0
         fi
         
-        # Check if any markdown files changed in the docs path
+        # Check if any markdown files changed since the last documentation tag
         if [ "${{ github.event_name }}" = "push" ]; then
-          # Get the previous commit (parent of current HEAD)
-          PREV_COMMIT="${{ github.event.before }}"
-          CURRENT_COMMIT="${{ github.sha }}"
+          # Get the latest documentation tag
+          LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n 1)
           
-          # If this is the first commit, compare against empty tree
-          if [ "$PREV_COMMIT" = "0000000000000000000000000000000000000000" ]; then
-            CHANGED_FILES=$(git diff --name-only 4b825dc642cb6eb9a060e54bf8d69288fbee4904 $CURRENT_COMMIT)
+          if [ -z "$LATEST_TAG" ]; then
+            # No existing tags, check all files in the repository
+            echo "No existing documentation tags found - checking all markdown files"
+            CHANGED_FILES=$(git ls-files)
           else
-            CHANGED_FILES=$(git diff --name-only $PREV_COMMIT $CURRENT_COMMIT)
+            # Compare changes since the latest documentation tag
+            echo "Checking changes since latest tag: $LATEST_TAG"
+            CHANGED_FILES=$(git diff --name-only $LATEST_TAG..HEAD)
           fi
           
           # Filter changes to the specified docs path and check for .md files
@@ -85,12 +87,12 @@ runs:
           fi
           
           if [ -n "$MD_CHANGES" ]; then
-            echo "Markdown files changed in $DOCS_PATH:"
+            echo "Markdown files changed in $DOCS_PATH since $LATEST_TAG:"
             echo "$MD_CHANGES"
             echo "docs-changed=true" >> $GITHUB_OUTPUT
           else
-            echo "No markdown files changed in $DOCS_PATH"
-            echo "Changed files:"
+            echo "No markdown files changed in $DOCS_PATH since $LATEST_TAG"
+            echo "Changed files since $LATEST_TAG:"
             echo "$CHANGED_FILES"
             echo "docs-changed=false" >> $GITHUB_OUTPUT
           fi

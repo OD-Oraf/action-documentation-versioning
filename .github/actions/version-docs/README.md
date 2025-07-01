@@ -63,9 +63,11 @@ A composite GitHub Action that automatically creates semantic version tags for d
 
 The action checks for changes in markdown files (`.md` extension) within the specified `docs_path`:
 
-- **Push Events**: Compares current commit with previous commit
+- **Push Events**: Compares current HEAD with the latest `documentation-v*` tag (or all files if no tags exist)
 - **Workflow Dispatch**: Always proceeds with versioning
 - **Other Events**: Skips versioning by default
+
+This approach ensures that all documentation changes since the last version are captured, even across multiple commits or complex merge scenarios.
 
 ### Version Increment Logic
 
