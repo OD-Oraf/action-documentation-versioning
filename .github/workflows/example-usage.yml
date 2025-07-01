@@ -1,0 +1,74 @@
+name: Example - Using Documentation Versioning Action
+
+on:
+  push:
+    branches: [ "main" ]
+  workflow_dispatch:
+    inputs:
+      version_increment:
+        description: 'Version increment strategy'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+      force_versioning:
+        description: 'Force versioning even if no changes detected'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  version-documentation:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    outputs:
+      version-tag: ${{ steps.version-docs.outputs.version-tag }}
+      docs-changed: ${{ steps.version-docs.outputs.docs-changed }}
+      tag-created: ${{ steps.version-docs.outputs.tag-created }}
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Required for git tag operations
+      
+      - name: Version Documentation
+        id: version-docs
+        uses: ./.github/actions/version-docs
+        with:
+          version_increment: ${{ github.event.inputs.version_increment || 'patch' }}
+          force_versioning: ${{ github.event.inputs.force_versioning || 'false' }}
+          docs_path: 'documentation'
+  
+  create-release:
+    needs: version-documentation
+    if: needs.version-documentation.outputs.tag-created == 'true'
+    runs-on: ubuntu-latest
+    name: "Release ${{ needs.version-documentation.outputs.version-tag }}"
+    
+    steps:
+      - name: Display release information
+        run: |
+          echo "🎉 **Documentation Release Created**"
+          echo "**Version:** ${{ needs.version-documentation.outputs.version-tag }}"
+          echo "**Changes Detected:** ${{ needs.version-documentation.outputs.docs-changed }}"
+          echo ""
+          echo "The documentation has been successfully versioned and tagged."
+          echo "You can now use this tag with the documentation merge action."
+      
+      - name: Example - Use with merge action
+        run: |
+          echo "Example usage with the composite merge action:"
+          echo ""
+          echo "```yaml"
+          echo "- uses: ./"
+          echo "  with:"
+          echo "    tag: ${{ needs.version-documentation.outputs.version-tag }}"
+          echo "    target-branch: main"
+          echo "    create-pr: true"
+          echo "```"

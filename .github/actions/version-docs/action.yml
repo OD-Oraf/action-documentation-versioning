@@ -1,0 +1,193 @@
+name: 'Documentation Versioning Action'
+description: 'Automatically version documentation by creating semantic version tags when markdown files change'
+author: 'OD-Oraf'
+
+inputs:
+  version_increment:
+    description: 'Version increment strategy (patch, minor, major)'
+    required: false
+    default: 'patch'
+  force_versioning:
+    description: 'Force versioning even if no markdown changes detected'
+    required: false
+    default: 'false'
+  docs_path:
+    description: 'Path to documentation files to check for changes'
+    required: false
+    default: '.'
+
+outputs:
+  version-tag:
+    description: 'The created version tag'
+    value: ${{ steps.tag-version.outputs.tag }}
+  docs-changed:
+    description: 'Whether documentation files were changed'
+    value: ${{ steps.check-changes.outputs.docs-changed }}
+  version-description:
+    description: 'Description of the versioning action taken'
+    value: ${{ steps.set-description.outputs.description }}
+  tag-created:
+    description: 'Whether a new tag was created'
+    value: ${{ steps.tag-version.outputs.tag-created }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate inputs
+      shell: bash
+      run: |
+        VERSION_INCREMENT="${{ inputs.version_increment }}"
+        
+        # Check if version_increment is valid
+        if [[ -n "$VERSION_INCREMENT" && ! "$VERSION_INCREMENT" =~ ^(patch|minor|major)$ ]]; then
+          echo "❌ Error: Invalid version_increment value: '$VERSION_INCREMENT'"
+          echo "Valid values are: patch, minor, major"
+          exit 1
+        fi
+        
+        # Set default if empty
+        if [[ -z "$VERSION_INCREMENT" ]]; then
+          VERSION_INCREMENT="patch"
+          echo "ℹ️  No version_increment specified, defaulting to: patch"
+        else
+          echo "✅ Version increment validated: $VERSION_INCREMENT"
+        fi
+
+    - name: Check for markdown file changes
+      id: check-changes
+      shell: bash
+      run: |
+        if [ "${{ inputs.force_versioning }}" = "true" ]; then
+          echo "Force versioning enabled - proceeding with versioning"
+          echo "docs-changed=true" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Check if any markdown files changed in the docs path
+        if [ "${{ github.event_name }}" = "push" ]; then
+          # Get the previous commit (parent of current HEAD)
+          PREV_COMMIT="${{ github.event.before }}"
+          CURRENT_COMMIT="${{ github.sha }}"
+          
+          # If this is the first commit, compare against empty tree
+          if [ "$PREV_COMMIT" = "0000000000000000000000000000000000000000" ]; then
+            CHANGED_FILES=$(git diff --name-only 4b825dc642cb6eb9a060e54bf8d69288fbee4904 $CURRENT_COMMIT)
+          else
+            CHANGED_FILES=$(git diff --name-only $PREV_COMMIT $CURRENT_COMMIT)
+          fi
+          
+          # Filter changes to the specified docs path and check for .md files
+          DOCS_PATH="${{ inputs.docs_path }}"
+          if [ "$DOCS_PATH" = "." ]; then
+            MD_CHANGES=$(echo "$CHANGED_FILES" | grep -E '\.md$' || true)
+          else
+            MD_CHANGES=$(echo "$CHANGED_FILES" | grep -E "^${DOCS_PATH}.*\.md$" || true)
+          fi
+          
+          if [ -n "$MD_CHANGES" ]; then
+            echo "Markdown files changed in $DOCS_PATH:"
+            echo "$MD_CHANGES"
+            echo "docs-changed=true" >> $GITHUB_OUTPUT
+          else
+            echo "No markdown files changed in $DOCS_PATH"
+            echo "Changed files:"
+            echo "$CHANGED_FILES"
+            echo "docs-changed=false" >> $GITHUB_OUTPUT
+          fi
+        elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          echo "Manual trigger - proceeding with versioning"
+          echo "docs-changed=true" >> $GITHUB_OUTPUT
+        else
+          # For other events (like PR), don't create tags by default
+          echo "${{ github.event_name }} event - skipping versioning by default"
+          echo "docs-changed=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Tag documentation version
+      id: tag-version
+      if: steps.check-changes.outputs.docs-changed == 'true'
+      shell: bash
+      run: |
+        # Get the latest documentation tag
+        LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n 1)
+        
+        if [ -z "$LATEST_TAG" ]; then
+          # No existing tags, start with v1.0.0
+          NEW_TAG="documentation-v1.0.0"
+        else
+          # Extract version numbers from the latest tag
+          VERSION=$(echo $LATEST_TAG | sed 's/documentation-v//')
+          MAJOR=$(echo $VERSION | cut -d. -f1)
+          MINOR=$(echo $VERSION | cut -d. -f2)
+          PATCH=$(echo $VERSION | cut -d. -f3)
+          
+          # Increment based on the version_increment input
+          case "${{ inputs.version_increment }}" in
+            "major")
+              MAJOR=$((MAJOR + 1))
+              MINOR=0
+              PATCH=0
+              ;;
+            "minor")
+              MINOR=$((MINOR + 1))
+              PATCH=0
+              ;;
+            "patch"|"")
+              PATCH=$((PATCH + 1))
+              ;;
+            *)
+              echo "Invalid version_increment value: ${{ inputs.version_increment }}"
+              echo "Valid values are: major, minor, patch"
+              exit 1
+              ;;
+          esac
+          
+          NEW_TAG="documentation-v${MAJOR}.${MINOR}.${PATCH}"
+        fi
+        
+        # Configure git user
+        git config user.name "GitHub Actions"
+        git config user.email "action@github.com"
+        
+        # Create and push the tag
+        git tag -a "$NEW_TAG" -m "Documentation version $NEW_TAG"
+        git push origin "$NEW_TAG"
+        
+        echo "Successfully created and pushed tag: $NEW_TAG"
+        echo "tag=$NEW_TAG" >> $GITHUB_OUTPUT
+        echo "tag-created=true" >> $GITHUB_OUTPUT
+
+    - name: Set version description
+      id: set-description
+      shell: bash
+      run: |
+        if [[ "${{ inputs.force_versioning }}" == "true" ]]; then
+          INCREMENT_TYPE="${{ inputs.version_increment }}"
+          if [[ -z "$INCREMENT_TYPE" ]]; then
+            INCREMENT_TYPE="patch"
+          fi
+          echo "description=Forced versioning ($INCREMENT_TYPE increment): version incremented to ${{ steps.tag-version.outputs.tag || 'documentation-v1.0.0' }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+          INCREMENT_TYPE="${{ inputs.version_increment }}"
+          if [[ -z "$INCREMENT_TYPE" ]]; then
+            INCREMENT_TYPE="patch"
+          fi
+          echo "description=Manual trigger ($INCREMENT_TYPE increment): version incremented to ${{ steps.tag-version.outputs.tag || 'documentation-v1.0.0' }}" >> $GITHUB_OUTPUT
+        elif [[ "${{ steps.check-changes.outputs.docs-changed }}" == "true" ]]; then
+          echo "description=Changes detected in markdown files: version incremented to ${{ steps.tag-version.outputs.tag }} (patch increment)" >> $GITHUB_OUTPUT
+        else
+          echo "description=No changes detected in markdown files: version increment skipped" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Display version action
+      shell: bash
+      run: |
+        echo "📋 **Versioning Summary:**"
+        echo "${{ steps.set-description.outputs.description }}"
+        
+        if [[ "${{ steps.check-changes.outputs.docs-changed }}" == "false" ]]; then
+          echo ""
+          echo "ℹ️  Documentation versioning skipped"
+          echo "Reason: No markdown files were modified"
+          echo "To force versioning, set force_versioning input to 'true'"
+        fi
