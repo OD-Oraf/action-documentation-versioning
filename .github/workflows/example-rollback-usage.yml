@@ -1,0 +1,232 @@
+name: Example - Documentation Rollback Usage
+
+# This workflow demonstrates various ways to use the rollback-docs composite action
+# It includes examples for different scenarios and use cases
+
+on:
+  workflow_dispatch:
+    inputs:
+      example_scenario:
+        description: 'Choose an example scenario to run'
+        required: true
+        type: choice
+        options:
+          - 'basic-rollback'
+          - 'custom-branch-rollback'
+          - 'specific-docs-path'
+          - 'emergency-rollback'
+        default: 'basic-rollback'
+      rollback_version:
+        description: 'Version to rollback to (e.g., 1.0.0)'
+        required: true
+        type: string
+        default: '1.0.0'
+      confirm_action:
+        description: 'Type "CONFIRM" to proceed'
+        required: true
+        type: string
+
+jobs:
+  # Example 1: Basic rollback to main branch
+  basic-rollback:
+    if: github.event.inputs.example_scenario == 'basic-rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Basic Documentation Rollback
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.rollback_version }}
+          confirm_rollback: ${{ github.event.inputs.confirm_action }}
+          # Uses defaults: target_branch='main', docs_path='.'
+
+      - name: Display Results
+        run: |
+          echo "## Basic Rollback Results"
+          echo "- Rollback completed: ${{ steps.rollback.outputs.rollback-completed }}"
+          echo "- Files updated: ${{ steps.rollback.outputs.merged-files }}"
+          echo "- Commit SHA: ${{ steps.rollback.outputs.commit-sha }}"
+          echo "- Tag used: ${{ steps.rollback.outputs.tag-used }}"
+
+  # Example 2: Rollback to a custom branch
+  custom-branch-rollback:
+    if: github.event.inputs.example_scenario == 'custom-branch-rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Custom Branch Documentation Rollback
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.rollback_version }}
+          target_branch: 'develop'  # Rolling back to develop branch instead of main
+          confirm_rollback: ${{ github.event.inputs.confirm_action }}
+
+      - name: Display Results
+        run: |
+          echo "## Custom Branch Rollback Results"
+          echo "- Target branch: develop"
+          echo "- Rollback completed: ${{ steps.rollback.outputs.rollback-completed }}"
+          echo "- Files updated: ${{ steps.rollback.outputs.merged-files }}"
+          echo "- Latest version before rollback: ${{ steps.rollback.outputs.latest-version }}"
+
+  # Example 3: Rollback specific documentation path
+  specific-docs-path:
+    if: github.event.inputs.example_scenario == 'specific-docs-path'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Specific Path Documentation Rollback
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.rollback_version }}
+          docs_path: './documentation'  # Only rollback files in documentation folder
+          confirm_rollback: ${{ github.event.inputs.confirm_action }}
+
+      - name: Display Results
+        run: |
+          echo "## Specific Path Rollback Results"
+          echo "- Documentation path: ./documentation"
+          echo "- Rollback completed: ${{ steps.rollback.outputs.rollback-completed }}"
+          echo "- Files updated: ${{ steps.rollback.outputs.merged-files }}"
+
+  # Example 4: Emergency rollback with additional safety checks
+  emergency-rollback:
+    if: github.event.inputs.example_scenario == 'emergency-rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Pre-rollback Safety Check
+        run: |
+          echo "## 🚨 Emergency Rollback Procedure"
+          echo "This is an emergency rollback scenario with additional safety measures."
+          echo ""
+          echo "**Pre-rollback checklist:**"
+          echo "- [ ] Incident has been identified and documented"
+          echo "- [ ] Rollback target version has been verified"
+          echo "- [ ] Team has been notified of the emergency rollback"
+          echo "- [ ] Confirmation has been provided: ${{ github.event.inputs.confirm_action }}"
+          echo ""
+          echo "⚠️ **Proceeding with emergency rollback...**"
+
+      - name: Emergency Documentation Rollback
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.rollback_version }}
+          confirm_rollback: ${{ github.event.inputs.confirm_action }}
+
+      - name: Post-rollback Verification
+        run: |
+          echo "## 📋 Emergency Rollback Verification"
+          
+          if [ "${{ steps.rollback.outputs.rollback-completed }}" = "true" ]; then
+            echo "### ✅ Emergency Rollback Successful"
+            echo ""
+            echo "**Rollback Details:**"
+            echo "- Emergency rollback completed at: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+            echo "- Rolled back to version: ${{ github.event.inputs.rollback_version }}"
+            echo "- Tag used: ${{ steps.rollback.outputs.tag-used }}"
+            echo "- Files affected: ${{ steps.rollback.outputs.merged-files }}"
+            echo "- Commit SHA: ${{ steps.rollback.outputs.commit-sha }}"
+            echo ""
+            echo "**Next Steps:**"
+            echo "1. Verify documentation is working correctly"
+            echo "2. Notify stakeholders of the rollback completion"
+            echo "3. Investigate root cause of the issue"
+            echo "4. Plan for proper fix and re-deployment"
+          else
+            echo "### ⚠️ Emergency Rollback Not Needed"
+            echo ""
+            echo "The documentation was already at the target version."
+            echo "- Current version matches target: ${{ github.event.inputs.rollback_version }}"
+            echo "- Latest version: ${{ steps.rollback.outputs.latest-version }}"
+          fi
+
+      - name: Create Incident Report
+        if: steps.rollback.outputs.rollback-completed == 'true'
+        run: |
+          echo "## 📄 Incident Report Template"
+          echo ""
+          echo "**Incident Summary:**"
+          echo "- Date: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+          echo "- Type: Emergency Documentation Rollback"
+          echo "- Severity: [TO BE FILLED]"
+          echo "- Duration: [TO BE FILLED]"
+          echo ""
+          echo "**Rollback Details:**"
+          echo "- From Version: ${{ steps.rollback.outputs.latest-version }}"
+          echo "- To Version: ${{ github.event.inputs.rollback_version }}"
+          echo "- Files Affected: ${{ steps.rollback.outputs.merged-files }}"
+          echo "- Commit SHA: ${{ steps.rollback.outputs.commit-sha }}"
+          echo ""
+          echo "**Root Cause:** [TO BE INVESTIGATED]"
+          echo ""
+          echo "**Resolution:** Emergency rollback completed successfully"
+          echo ""
+          echo "**Follow-up Actions:**"
+          echo "- [ ] Root cause analysis"
+          echo "- [ ] Fix implementation"
+          echo "- [ ] Testing and validation"
+          echo "- [ ] Proper re-deployment"
+
+  # Example 5: Conditional rollback based on validation
+  conditional-rollback:
+    if: github.event.inputs.example_scenario == 'conditional-rollback'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Pre-rollback Validation
+        id: validate
+        run: |
+          # Example: Check if current documentation has issues
+          # This could be replaced with actual validation logic
+          
+          echo "## 🔍 Pre-rollback Validation"
+          echo "Checking current documentation state..."
+          
+          # Simulate validation (replace with real checks)
+          VALIDATION_PASSED=true
+          
+          if [ "$VALIDATION_PASSED" = "true" ]; then
+            echo "✅ Current documentation appears to be working"
+            echo "should-rollback=false" >> $GITHUB_OUTPUT
+          else
+            echo "❌ Issues detected in current documentation"
+            echo "should-rollback=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Conditional Documentation Rollback
+        if: steps.validate.outputs.should-rollback == 'true'
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.rollback_version }}
+          confirm_rollback: ${{ github.event.inputs.confirm_action }}
+
+      - name: Rollback Decision Summary
+        run: |
+          echo "## 📊 Rollback Decision Summary"
+          
+          if [ "${{ steps.validate.outputs.should-rollback }}" = "true" ]; then
+            echo "**Decision:** Rollback was necessary and executed"
+            echo "- Validation failed, rollback was performed"
+            echo "- Rollback completed: ${{ steps.rollback.outputs.rollback-completed }}"
+            echo "- Files updated: ${{ steps.rollback.outputs.merged-files }}"
+          else
+            echo "**Decision:** Rollback was not necessary"
+            echo "- Current documentation passed validation"
+            echo "- No rollback was performed"
+          fi

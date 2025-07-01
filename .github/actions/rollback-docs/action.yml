@@ -1,0 +1,288 @@
+name: 'Documentation Rollback Action'
+description: 'Rollback documentation to a specific tagged version with comprehensive validation'
+author: 'OD-Oraf'
+
+inputs:
+  rollback_to_version:
+    description: 'Documentation version to rollback to (e.g., 1.0.0)'
+    required: true
+  target_branch:
+    description: 'Branch to rollback documentation in'
+    required: false
+    default: 'main'
+  docs_path:
+    description: 'Path to documentation files'
+    required: false
+    default: '.'
+  confirm_rollback:
+    description: 'Type "CONFIRM" to proceed with rollback'
+    required: true
+
+outputs:
+  rollback-completed:
+    description: 'Whether the rollback was completed successfully'
+    value: ${{ steps.perform-rollback.outputs.rollback-completed }}
+  merged-files:
+    description: 'List of files that were rolled back'
+    value: ${{ steps.perform-rollback.outputs.merged-files }}
+  commit-sha:
+    description: 'SHA of the rollback commit'
+    value: ${{ steps.perform-rollback.outputs.commit-sha }}
+  tag-used:
+    description: 'Full tag name used for rollback'
+    value: ${{ steps.construct-tags.outputs.rollback-tag }}
+  latest-version:
+    description: 'Latest documentation version before rollback'
+    value: ${{ steps.get-latest.outputs.latest-version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        ref: ${{ inputs.target_branch }}
+
+    - name: Construct tag names
+      id: construct-tags
+      shell: bash
+      run: |
+        ROLLBACK_VERSION="${{ inputs.rollback_to_version }}"
+        ROLLBACK_TAG="documentation-v${ROLLBACK_VERSION}"
+        echo "rollback-tag=$ROLLBACK_TAG" >> $GITHUB_OUTPUT
+        echo "✅ Constructed rollback tag: $ROLLBACK_TAG"
+
+    - name: Validate confirmation
+      shell: bash
+      run: |
+        if [ "${{ inputs.confirm_rollback }}" != "CONFIRM" ]; then
+          echo "❌ Rollback not confirmed. You must type 'CONFIRM' to proceed."
+          exit 1
+        fi
+        echo "✅ Rollback confirmed"
+
+    - name: Validate version format
+      shell: bash
+      run: |
+        VERSION="${{ inputs.rollback_to_version }}"
+        if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+          echo "❌ Error: Version must follow semantic versioning pattern 'X.Y.Z' (e.g., 1.0.0)"
+          echo "Provided: $VERSION"
+          exit 1
+        fi
+        echo "✅ Version format is valid: $VERSION"
+
+    - name: Validate target branch exists
+      shell: bash
+      run: |
+        TARGET_BRANCH="${{ inputs.target_branch }}"
+        if ! git show-ref --verify --quiet refs/heads/"$TARGET_BRANCH" && ! git show-ref --verify --quiet refs/remotes/origin/"$TARGET_BRANCH"; then
+          echo "❌ Error: Target branch '$TARGET_BRANCH' does not exist"
+          echo "Available branches:"
+          git branch -a | grep -E "(remotes/origin/|^\s*\*?\s*[^/]+$)" | sed 's/remotes\/origin\///' | sed 's/^\s*\*\?\s*//' | sort -u
+          exit 1
+        fi
+        echo "✅ Target branch '$TARGET_BRANCH' exists"
+
+    - name: Get latest documentation version
+      id: get-latest
+      shell: bash
+      run: |
+        LATEST_TAG=$(git tag -l "documentation-v*" | sort -V | tail -n1)
+        if [ -n "$LATEST_TAG" ]; then
+          LATEST_VERSION=${LATEST_TAG#documentation-v}
+          echo "latest-version=$LATEST_VERSION" >> $GITHUB_OUTPUT
+          echo "latest-tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          echo "Current latest documentation version: $LATEST_VERSION ($LATEST_TAG)"
+        else
+          echo "latest-version=" >> $GITHUB_OUTPUT
+          echo "latest-tag=" >> $GITHUB_OUTPUT
+          echo "No documentation tags found"
+        fi
+
+    - name: Validate rollback target
+      shell: bash
+      run: |
+        ROLLBACK_TAG="${{ steps.construct-tags.outputs.rollback-tag }}"
+        ROLLBACK_VERSION="${{ inputs.rollback_to_version }}"
+        LATEST_VERSION="${{ steps.get-latest.outputs.latest-version }}"
+        
+        # Check if rollback tag exists
+        if ! git tag -l | grep -q "^$ROLLBACK_TAG$"; then
+          echo "❌ Error: Version '$ROLLBACK_VERSION' does not exist (tag '$ROLLBACK_TAG' not found)"
+          echo "Available documentation versions:"
+          git tag -l "documentation-v*" | sort -V | sed 's/documentation-v//'
+          exit 1
+        fi
+        
+        # Check if we're actually rolling back (not forward)
+        if [ "$ROLLBACK_VERSION" = "$LATEST_VERSION" ]; then
+          echo "⚠️  Warning: Rolling back to the same version as current latest ($ROLLBACK_VERSION)"
+        fi
+        
+        echo "✅ Rollback target version '$ROLLBACK_VERSION' is valid"
+
+    - name: Validate documentation path
+      shell: bash
+      run: |
+        DOCS_PATH="${{ inputs.docs_path }}"
+        
+        # Handle current directory case
+        if [[ "$DOCS_PATH" == "." ]]; then
+          echo "✅ Using current directory as documentation path"
+          exit 0
+        fi
+        
+        # Check if the path exists in the target branch
+        if [[ ! -d "$DOCS_PATH" ]]; then
+          echo "❌ Error: Documentation path '$DOCS_PATH' does not exist in branch '${{ inputs.target_branch }}'"
+          echo "Available directories:"
+          find . -type d -maxdepth 3 | head -10
+          exit 1
+        fi
+        
+        # Check if path contains markdown files (current or target version)
+        MD_FILES_CURRENT=$(find "$DOCS_PATH" -name "*.md" -type f | head -5)
+        if [[ -z "$MD_FILES_CURRENT" ]]; then
+          echo "⚠️  Warning: No markdown files found in '$DOCS_PATH' in current branch"
+          echo "This may be expected if documentation was removed"
+        else
+          echo "✅ Documentation path '$DOCS_PATH' exists and contains markdown files"
+        fi
+
+    - name: Ensure clean working directory
+      shell: bash
+      run: |
+        if [[ -n $(git status --porcelain) ]]; then
+          echo "❌ Error: Working directory is not clean"
+          echo "Uncommitted changes detected:"
+          git status --porcelain
+          echo ""
+          echo "Please commit or stash your changes before proceeding with rollback"
+          exit 1
+        fi
+        echo "✅ Working directory is clean"
+
+    - name: Display rollback information
+      shell: bash
+      run: |
+        echo "## 🔄 Documentation Rollback"
+        echo "- **Rolling back to version**: ${{ inputs.rollback_to_version }}"
+        echo "- **Rolling back to tag**: ${{ steps.construct-tags.outputs.rollback-tag }}"
+        echo "- **Current latest version**: ${{ steps.get-latest.outputs.latest-version }}"
+        echo "- **Target branch**: ${{ inputs.target_branch }}"
+        echo "- **Documentation path**: ${{ inputs.docs_path }}"
+        echo ""
+        echo "⚠️  **This will overwrite current documentation with the selected version**"
+
+    - name: Perform rollback
+      id: perform-rollback
+      shell: bash
+      run: |
+        ROLLBACK_TAG="${{ steps.construct-tags.outputs.rollback-tag }}"
+        TARGET_BRANCH="${{ inputs.target_branch }}"
+        DOCS_PATH="${{ inputs.docs_path }}"
+        
+        # Configure git
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        
+        # Create temporary branch to access tag content
+        TEMP_BRANCH="temp-rollback-$(date +%s)"
+        git checkout -b "$TEMP_BRANCH" "$ROLLBACK_TAG"
+        
+        # Find markdown files in the tag
+        if [[ "$DOCS_PATH" == "." ]]; then
+          MARKDOWN_FILES=$(find . -name "*.md" -type f | grep -v "^\./.git/" || true)
+        else
+          MARKDOWN_FILES=$(find "$DOCS_PATH" -name "*.md" -type f 2>/dev/null || true)
+        fi
+        
+        if [[ -z "$MARKDOWN_FILES" ]]; then
+          echo "No markdown files found in tag $ROLLBACK_TAG"
+          git checkout "$TARGET_BRANCH"
+          git branch -D "$TEMP_BRANCH"
+          echo "rollback-completed=false" >> $GITHUB_OUTPUT
+          echo "merged-files=" >> $GITHUB_OUTPUT
+          echo "commit-sha=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Switch back to target branch
+        git checkout "$TARGET_BRANCH"
+        
+        # Copy files from tag to target branch
+        MERGED_FILES=""
+        for file in $MARKDOWN_FILES; do
+          # Create directory if it doesn't exist
+          mkdir -p "$(dirname "$file")"
+          
+          # Copy file from tag
+          git show "$ROLLBACK_TAG:$file" > "$file" 2>/dev/null || {
+            echo "Warning: Could not extract $file from $ROLLBACK_TAG"
+            continue
+          }
+          
+          if [[ -n "$MERGED_FILES" ]]; then
+            MERGED_FILES="$MERGED_FILES,$file"
+          else
+            MERGED_FILES="$file"
+          fi
+        done
+        
+        # Clean up temporary branch
+        git branch -D "$TEMP_BRANCH"
+        
+        # Check if there are any changes to commit
+        if [[ -z $(git status --porcelain) ]]; then
+          echo "No changes detected after rollback - documentation was already at target version"
+          echo "rollback-completed=false" >> $GITHUB_OUTPUT
+          echo "merged-files=" >> $GITHUB_OUTPUT
+          echo "commit-sha=" >> $GITHUB_OUTPUT
+          exit 0
+        fi
+        
+        # Add and commit changes
+        git add .
+        COMMIT_MSG="docs: rollback documentation to version ${{ inputs.rollback_to_version }}
+
+Rolled back from tag: $ROLLBACK_TAG
+Target branch: $TARGET_BRANCH
+Documentation path: $DOCS_PATH
+Files updated: $MERGED_FILES"
+        
+        git commit -m "$COMMIT_MSG"
+        COMMIT_SHA=$(git rev-parse HEAD)
+        
+        # Push changes
+        git push origin "$TARGET_BRANCH"
+        
+        echo "rollback-completed=true" >> $GITHUB_OUTPUT
+        echo "merged-files=$MERGED_FILES" >> $GITHUB_OUTPUT
+        echo "commit-sha=$COMMIT_SHA" >> $GITHUB_OUTPUT
+        
+        echo "✅ Rollback completed successfully"
+        echo "- Files updated: $MERGED_FILES"
+        echo "- Commit SHA: $COMMIT_SHA"
+
+    - name: Rollback summary
+      shell: bash
+      run: |
+        echo "## 📋 Rollback Summary"
+        
+        if [ "${{ steps.perform-rollback.outputs.rollback-completed }}" = "true" ]; then
+          echo "### ✅ Rollback Completed Successfully"
+          echo "- **Rolled back to version**: ${{ inputs.rollback_to_version }}"
+          echo "- **Full tag used**: ${{ steps.construct-tags.outputs.rollback-tag }}"
+          echo "- **Files updated**: ${{ steps.perform-rollback.outputs.merged-files }}"
+          echo "- **Commit SHA**: ${{ steps.perform-rollback.outputs.commit-sha }}"
+          echo "- **Target branch**: ${{ inputs.target_branch }}"
+          echo ""
+          echo "🎯 **Documentation has been successfully rolled back!**"
+        else
+          echo "### ℹ️ No Changes Made"
+          echo "The documentation in '${{ inputs.target_branch }}' was already at the same state as version '${{ inputs.rollback_to_version }}'."
+          echo ""
+          echo "✨ **No rollback was necessary.**"
+        fi

@@ -1,0 +1,49 @@
+name: Simple Rollback Example
+
+# Simple example showing how to use the rollback-docs composite action
+# This demonstrates the most common rollback scenarios
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Documentation version to rollback to (e.g., 1.0.0)'
+        required: true
+        type: string
+      branch:
+        description: 'Target branch (optional)'
+        required: false
+        default: 'main'
+        type: string
+      confirm:
+        description: 'Type "CONFIRM" to proceed with rollback'
+        required: true
+        type: string
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    
+    steps:
+      - name: Rollback Documentation
+        id: rollback
+        uses: ./.github/actions/rollback-docs
+        with:
+          rollback_to_version: ${{ github.event.inputs.version }}
+          target_branch: ${{ github.event.inputs.branch }}
+          confirm_rollback: ${{ github.event.inputs.confirm }}
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.rollback.outputs.rollback-completed }}" = "true" ]; then
+            echo "✅ **Rollback Successful**"
+            echo "- Version: ${{ github.event.inputs.version }}"
+            echo "- Branch: ${{ github.event.inputs.branch }}"
+            echo "- Files: ${{ steps.rollback.outputs.merged-files }}"
+            echo "- Commit: ${{ steps.rollback.outputs.commit-sha }}"
+          else
+            echo "ℹ️ **No Rollback Needed**"
+            echo "Documentation was already at version ${{ github.event.inputs.version }}"
+          fi
