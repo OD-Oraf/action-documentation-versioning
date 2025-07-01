@@ -112,49 +112,56 @@ runs:
         fi
 
         # Configure git
-        git config --local user.email "action@github.com"
-        git config --local user.name "Documentation Merger Action"
+        git config user.name "GitHub Actions"
+        git config user.email "action@github.com"
 
         # Create a list to track actually merged files
         MERGED_FILES=""
         CHANGES_MADE=false
         FULL_TAG="${{ steps.construct-tag.outputs.full-tag }}"
 
-        cd "${{ inputs.docs-path }}"
+        echo "🔄 Starting merge process for $FULL_TAG into ${{ inputs.target-branch }}"
         
+        # Process each markdown file
         for file in ${{ steps.find-files.outputs.markdown-files }}; do
           # Remove leading ./
           clean_file=${file#./}
+          full_path="${{ inputs.docs-path }}/$clean_file"
+          
+          echo "Processing: $clean_file"
           
           # Check if file exists in tag
-          if git show "$FULL_TAG:${{ inputs.docs-path }}/$clean_file" > /dev/null 2>&1; then
+          if git show "$FULL_TAG:$full_path" > /dev/null 2>&1; then
             # Create directory if it doesn't exist
-            mkdir -p "$(dirname "$clean_file")"
+            mkdir -p "$(dirname "${{ inputs.docs-path }}/$clean_file")"
             
-            # Extract file from tag and save it
-            git show "$FULL_TAG:${{ inputs.docs-path }}/$clean_file" > "$clean_file"
+            # Extract file from tag and save it to target location
+            git show "$FULL_TAG:$full_path" > "${{ inputs.docs-path }}/$clean_file"
             
-            # Check if file actually changed
-            if git diff --quiet "$clean_file" 2>/dev/null || ! git ls-files --error-unmatch "$clean_file" > /dev/null 2>&1; then
-              git add "$clean_file"
-              MERGED_FILES="$MERGED_FILES $clean_file"
-              CHANGES_MADE=true
-              echo "✅ Merged: $clean_file"
-            else
-              echo "ℹ️  No changes: $clean_file"
-            fi
+            # Add the file to git (this will stage it regardless of changes)
+            git add "${{ inputs.docs-path }}/$clean_file"
+            MERGED_FILES="$MERGED_FILES $clean_file"
+            CHANGES_MADE=true
+            echo "✅ Merged: $clean_file"
           else
-            echo "⚠️  File not found in tag: $clean_file"
+            echo "⚠️  File not found in tag: $full_path"
           fi
         done
+
+        # Check if there are actually staged changes
+        if git diff --cached --quiet; then
+          echo "ℹ️  No actual changes detected after file extraction"
+          CHANGES_MADE=false
+        fi
 
         if [ "$CHANGES_MADE" = true ]; then
           COMMIT_MSG="docs: merge markdown files from $FULL_TAG
 
-          Merged files:$MERGED_FILES
-          
-          Source version: ${{ inputs.version }}
-          Target branch: ${{ inputs.target-branch }}"
+Merged files:$MERGED_FILES
+
+Source version: ${{ inputs.version }}
+Target branch: ${{ inputs.target-branch }}
+Documentation path: ${{ inputs.docs-path }}"
           
           git commit -m "$COMMIT_MSG"
           COMMIT_SHA=$(git rev-parse HEAD)
